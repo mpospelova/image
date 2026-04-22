@@ -1,6 +1,7 @@
 use std::fs::{self, File};
 use std::io::{BufReader, Cursor};
 use std::path::PathBuf;
+use image::ImageDecoder;
 
 #[cfg(feature = "webp")]
 use image::{codecs::webp::WebPDecoder, AnimationDecoder};
@@ -129,6 +130,26 @@ fn bmp_bitfields() {
         .copied()
         .all(|b| b == 31 || b == 255));
 }
+
+#[cfg(feature = "bmp")]
+#[test]
+fn test_decode_bmp_rle_overflow() {
+    let img_path = BASE_PATH
+        .iter()
+        .collect::<PathBuf>()
+        .join(IMAGE_DIR)
+        .join("bmp/images/rle_overflow.bmp");
+    let data = fs::read(img_path).expect("Test image missing");
+
+    let decoder = image::codecs::bmp::BmpDecoder::new(std::io::Cursor::new(data)).unwrap();
+    let mut buffer = vec![0u8; decoder.total_bytes() as usize];
+    
+    let result = decoder.read_image(&mut buffer);
+    assert!(result.is_ok());
+}
+
+
+
 
 #[test]
 fn bad_gif_oom() {

@@ -659,7 +659,7 @@ fn set_8bit_pixel_run<'a, T: Iterator<Item = &'a u8>>(
             pixel[1] = rgb[1];
             pixel[2] = rgb[2];
         } else {
-            return false;
+            break;
         }
     }
     true
@@ -683,7 +683,7 @@ fn set_4bit_pixel_run<'a, T: Iterator<Item = &'a u8>>(
                     pixel[1] = rgb[1];
                     pixel[2] = rgb[2];
                 } else {
-                    return false;
+                    break;
                 }
                 n_pixels -= 1;
             };
@@ -1956,27 +1956,25 @@ impl<R: BufRead + Seek> BmpDecoder<R> {
                                         let mut length = count;
                                         length += length & 1;
                                         rle_reader.read_exact(&mut rle_indices_buffer[..length])?;
-                                        if !set_8bit_pixel_run(
+                                        // Silently truncate if run overflows the row.
+                                        set_8bit_pixel_run(
                                             &mut pixel_iter,
                                             p.unwrap(),
                                             rle_indices_buffer[..length].iter(),
                                             count,
-                                        ) {
-                                            return Err(DecoderError::CorruptRleData.into());
-                                        }
+                                        );
                                     }
                                     ImageType::RLE4 => {
                                         let mut length = count.div_ceil(2);
                                         length += length & 1;
                                         rle_reader.read_exact(&mut rle_indices_buffer[..length])?;
-                                        if !set_4bit_pixel_run(
+                                        // Silently truncate if run overflows the row.
+                                        set_4bit_pixel_run(
                                             &mut pixel_iter,
                                             p.unwrap(),
                                             rle_indices_buffer[..length].iter(),
                                             count,
-                                        ) {
-                                            return Err(DecoderError::CorruptRleData.into());
-                                        }
+                                        );
                                     }
                                     ImageType::RLE24 => {
                                         for _ in 0..count {
@@ -2017,14 +2015,14 @@ impl<R: BufRead + Seek> BmpDecoder<R> {
                             }
                             ImageType::RLE4 => {
                                 let palette_index = rle_reader.read_byte()?;
-                                if !set_4bit_pixel_run(
+                                // Silently truncate if run overflows the row
+                                // (matches RLE8 encoded run behavior).
+                                set_4bit_pixel_run(
                                     &mut pixel_iter,
                                     p.unwrap(),
                                     repeat(&palette_index),
                                     n_pixels,
-                                ) {
-                                    return Err(DecoderError::CorruptRleData.into());
-                                }
+                                );
                             }
                             ImageType::RLE24 => {
                                 let b = rle_reader.read_byte()?;
