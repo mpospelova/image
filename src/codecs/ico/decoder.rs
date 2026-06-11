@@ -159,7 +159,7 @@ impl<R: BufRead + Seek> IcoDecoder<R> {
         spec: SpecCompliance,
     ) -> ImageResult<IcoDecoder<R>> {
         let reader_offset = r.stream_position()?;
-        let entries = read_entries(&mut r)?;
+        let entries = read_entries(&mut r, spec)?;
         let entry = best_entry(entries)?;
         let decoder = entry.decoder(r, reader_offset)?;
 
@@ -172,28 +172,28 @@ impl<R: BufRead + Seek> IcoDecoder<R> {
     }
 }
 
-fn read_entries<R: Read>(r: &mut R) -> ImageResult<Vec<DirEntry>> {
+fn read_entries<R: Read>(r: &mut R, spec: SpecCompliance) -> ImageResult<Vec<DirEntry>> {
     let mut header = [0u8; 6];
     r.read_exact(&mut header)?;
     // header[0..2] = reserved, header[2..4] = type, header[4..6] = count
     let count = u16::from_le_bytes(header[4..6].try_into().unwrap());
-    (0..count).map(|_| read_entry(r)).collect()
+    (0..count).map(|_| read_entry(r, spec)).collect()
 }
 
-fn read_entry<R: Read>(r: &mut R) -> ImageResult<DirEntry> {
+fn read_entry<R: Read>(r: &mut R, spec: SpecCompliance) -> ImageResult<DirEntry> {
     let mut buf = [0u8; 16];
     r.read_exact(&mut buf)?;
 
     // Parse fields from buffer
     // buf[4..6]: may be color planes (0 or 1) or horizontal hotspot for CUR files
     let num_color_planes = u16::from_le_bytes(buf[4..6].try_into().unwrap());
-    if num_color_planes > 256 {
+    if spec == SpecCompliance::Strict && num_color_planes > 256 {
         return Err(DecoderError::IcoEntryTooManyPlanesOrHotspot.into());
     }
 
     // buf[6..8]: may be bit depth (0 = unspecified) or vertical hotspot for CUR files
     let bits_per_pixel = u16::from_le_bytes(buf[6..8].try_into().unwrap());
-    if bits_per_pixel > 256 {
+    if spec == SpecCompliance::Strict && bits_per_pixel > 256 {
         return Err(DecoderError::IcoEntryTooManyBitsPerPixelOrHotspot.into());
     }
 
@@ -602,5 +602,30 @@ mod test {
                 pixel[3]
             );
         }
+    }
+
+    #[test]
+    fn format_error_ico_strict_vs_lenient() {
+        let data = vec![
+            0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x01, 0x00, 0x00, 0xf4, 0x01,
+            0xf4, 0x01, 0x46, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00, 0x89, 0x50,
+            0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06,
+            0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49,
+            0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0xfc, 0xcf, 0xc0, 0x50, 0x0f, 0x00,
+            0x04, 0x85, 0x01, 0x80, 0x84, 0xa9, 0x8c, 0x21, 0x00, 0x00, 0x00, 0x00,
+            0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+        ];
+
+        let mut decoder =
+            IcoDecoder::with_spec_compliance(std::io::Cursor::new(&data), SpecCompliance::Lenient)
+                .unwrap();
+        let bytes = decoder.prepare_image().unwrap().total_bytes();
+        let mut buf = vec![0; usize::try_from(bytes).unwrap()];
+        assert!(decoder.read_image(&mut buf).is_ok());
+
+        let decoder_strict =
+            IcoDecoder::with_spec_compliance(std::io::Cursor::new(&data), SpecCompliance::Strict);
+        assert!(decoder_strict.is_err());
     }
 }
